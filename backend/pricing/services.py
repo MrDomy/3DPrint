@@ -1,11 +1,12 @@
 """Публичный интерфейс расчёта стоимости и сроков (спец. 6.3)."""
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
 
+from config.exceptions import DomainError
 from scheduling import services as scheduling_services
 
-from .formulas import compute_quote
+from .formulas import compute_quote, round_half_up
 from .models import DEFAULT_TARIFF_PARAMS, Quote, TariffVersion
 
 
@@ -20,12 +21,28 @@ def get_tariff_params() -> dict:
     return {**DEFAULT_TARIFF_PARAMS, **(get_active_tariff().params or {})}
 
 
-class QuoteError(Exception):
-    pass
+class QuoteError(DomainError):
+    def __init__(self, message, code='no_quote', status=400):
+        super().__init__(message, code=code, status=status)
 
 
 def current_quote(order):
+    if hasattr(order, '_prefetched_objects_cache') and 'quotes' in order._prefetched_objects_cache:
+        for q in order._prefetched_objects_cache['quotes']:
+            if q.is_current:
+                return q
+        return None
     return Quote.objects.filter(order=order, is_current=True).first()
+
+
+def _parse_decimal(val) -> Decimal:
+    try:
+        d = Decimal(str(val))
+    except (InvalidOperation, TypeError, ValueError):
+        raise DomainError('Некорректное числовое значение корректировки.', 'validation', 400)
+    if not d.is_finite():
+        raise DomainError('Некорректное числовое значение корректировки.', 'validation', 400)
+    return d.quantize(Decimal('0.01'))
 
 
 @transaction.atomic
@@ -37,9 +54,8 @@ def calculate(order, mv, needs_support=False, adjustment=None):
         raise QuoteError('Объём модели не определён.')
     tariff = get_active_tariff()
     params = {**DEFAULT_TARIFF_PARAMS, **(tariff.params or {})}
-    prev = current_quote(order)
-    if adjustment is None:
-        adjustment = prev.adjustment if prev else Decimal(0)
+    prev = Quote.objects.select_for_update().filter(order=order, is_current=True).first()
+    adj_dec = _parse_decimal(adjustment) if adjustment is not None else (prev.adjustment if prev else Decimal('0.00'))
     pps = list(order.post_processings.all())
     bbox = [mv.bbox_x or 0, mv.bbox_y or 0, mv.bbox_z or 0]
     wait = scheduling_services.queue_wait_hours(technology=order.technology, material=order.material,
@@ -51,30 +67,35 @@ def calculate(order, mv, needs_support=False, adjustment=None):
         support_factor=tech.support_factor, flow_cm3_h=q.flow_cm3_h, hourly_rate=tech.hourly_rate,
         setup_cost=tech.setup_cost, price_factor=q.price_factor,
         post_prices=[p.price for p in pps], post_hours=[p.hours for p in pps],
-        delivery_price=dm.price, delivery_days=dm.days, adjustment=adjustment, queue_wait_h=wait,
+        delivery_price=dm.price, delivery_days=dm.days, adjustment=adj_dec, queue_wait_h=wait,
         c_min=params['min_order_cost'], printer_hours_per_day=params['printer_hours_per_day'],
         post_hours_per_day=params['post_hours_per_day'])
+    if r.total < 0:
+        raise DomainError('Итоговая стоимость заказа не может быть отрицательной.', 'validation', 400)
     Quote.objects.filter(order=order, is_current=True).update(is_current=False)
     return Quote.objects.create(
         order=order, tariff_version=tariff, cost_material=round(r.cost_material, 2),
         cost_machine=round(r.cost_machine, 2), cost_post=round(r.cost_post, 2),
-        cost_delivery=round(r.cost_delivery, 2), adjustment=adjustment, total=r.total,
+        cost_delivery=round(r.cost_delivery, 2), adjustment=adj_dec, total=r.total,
         print_hours=round(r.print_hours, 2), mass_g=round(r.mass_g, 2), estimated_days=r.estimated_days,
         is_current=True)
 
 
 @transaction.atomic
 def apply_adjustment(order, adjustment):
-    """Корректировка цены администратором: пересчитывает итог с сохранением остальных частей."""
-    q = current_quote(order)
+    """Корректировка цены администратором с проверкой неотрицательного итога и блокировкой."""
+    adj_dec = _parse_decimal(adjustment)
+    q = Quote.objects.select_for_update().filter(order=order, is_current=True).first()
     if not q:
-        raise QuoteError('Расчёт отсутствует.')
+        raise QuoteError('Расчёт отсутствует.', 'no_quote', 409)
     old_adj = q.adjustment
-    q.is_current = False
-    q.save(update_fields=['is_current', 'updated_at'])
-    new_total = q.total - old_adj + Decimal(adjustment)
+    new_total = round_half_up(float(Decimal(q.total) - old_adj + adj_dec))
+    if new_total < 0:
+        raise DomainError('Итоговая стоимость заказа не может быть отрицательной.', 'validation', 400)
+    Quote.objects.filter(order=order, is_current=True).update(is_current=False)
     return Quote.objects.create(
         order=order, tariff_version=q.tariff_version, cost_material=q.cost_material,
         cost_machine=q.cost_machine, cost_post=q.cost_post, cost_delivery=q.cost_delivery,
-        adjustment=adjustment, total=round(new_total), print_hours=q.print_hours, mass_g=q.mass_g,
+        adjustment=adj_dec, total=new_total, print_hours=q.print_hours, mass_g=q.mass_g,
         estimated_days=q.estimated_days, is_current=True)
+

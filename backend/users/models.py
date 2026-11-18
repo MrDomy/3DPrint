@@ -55,6 +55,12 @@ class User(AbstractUser):
     class Meta:
         db_table = 'app_user'
 
+    def save(self, *args, **kwargs):
+        if self.role == self.Role.ADMIN:
+            self.is_staff = True
+            self.is_senior = True
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return self.email
 

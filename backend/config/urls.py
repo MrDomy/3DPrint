@@ -1,23 +1,13 @@
 from django.contrib import admin
-from django.http import JsonResponse
 from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 from catalog import views as catalog_views
+from config.views import health
 from integrations import views as integ
 from notifications import views as notif
 from orders import views as ov
 from scheduling import views as sched
-
-
-def health(request):
-    from django.db import connection
-    try:
-        connection.ensure_connection()
-        db = 'ok'
-    except Exception:
-        db = 'error'
-    return JsonResponse({'status': 'ok' if db == 'ok' else 'degraded', 'db': db})
 
 
 urlpatterns = [
@@ -41,6 +31,7 @@ urlpatterns = [
     path('api/orders/<uuid:pk>/repeat', ov.OrderRepeat.as_view()),
     path('api/orders/<uuid:pk>/decision', ov.OrderDecision.as_view()),
     path('api/orders/<uuid:pk>/status', ov.OrderStatus.as_view()),
+    path('api/orders/<uuid:pk>/priority', ov.OrderPriority.as_view()),
     path('api/orders/<uuid:pk>/adjustment', ov.OrderAdjustment.as_view()),
     path('api/orders/<uuid:pk>/messages', ov.OrderMessages.as_view()),
     path('api/orders/<uuid:pk>/recommendation', ov.OrderRecommendation.as_view()),

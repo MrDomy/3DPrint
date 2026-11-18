@@ -6,7 +6,7 @@ import Chat from '../components/Chat'
 import ModelViewer from '../components/ModelViewerLazy'
 import { ParamsBlock, QuoteBlock } from '../components/OrderSummary'
 import StatusTimeline from '../components/StatusTimeline'
-import { ErrorBox, InfoBox, Spinner, StatusBadge, VerdictPanel, fmtDate } from '../components/ui'
+import { ErrorBox, InfoBox, Spinner, StatusBadge, VerdictPanel, fmtDate, eventLabel } from '../components/ui'
 
 export default function OrderDetail() {
   const { id } = useParams()
@@ -60,7 +60,7 @@ export default function OrderDetail() {
         <h2 className="mb-2 text-lg font-semibold">История</h2>
         <ul className="space-y-1 text-sm">
           {[...o.events].reverse().map(e => (
-            <li key={e.id}><span className="text-slate-500">{fmtDate(e.created_at)}</span> — {e.actor}: {e.type === 'STATUS_CHANGED' ? `статус «${e.to_status}»` : e.type}{e.reason ? ` (${e.reason})` : ''}</li>
+            <li key={e.id}><span className="text-slate-500">{fmtDate(e.created_at)}</span> — {e.actor}: {eventLabel(e)}{e.reason ? ` (${e.reason})` : ''}</li>
           ))}
         </ul>
       </div>

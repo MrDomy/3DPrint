@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { api, ApiError, errMsg } from '../api/client'
+import { api, errMsg } from '../api/client'
 import type { Order } from '../api/types'
 import ModelViewer from '../components/ModelViewerLazy'
 import { QuoteBlock } from '../components/OrderSummary'
@@ -53,22 +53,29 @@ export default function NewOrder() {
   }
 
   async function upload(file: File) {
+    const ext = file.name.includes('.') ? file.name.split('.').pop()!.toUpperCase() : ''
+    if (!['STL', 'OBJ', '3MF'].includes(ext)) {
+      setError('E-01: Недопустимый формат файла. Поддерживаются только STL, OBJ, 3MF.')
+      return
+    }
+    if (file.size > 50 * 1024 * 1024) {
+      setError('E-01: Размер файла превышает 50 МБ.')
+      return
+    }
     setBusy(true); setError('')
-    let draft = o
-    let created = false
     try {
-      if (!draft) { draft = await api<Order>('/orders', { method: 'POST', body: {} }); created = true; setO(draft) }
       const fd = new FormData()
       fd.append('file', file)
-      await api(`/orders/${draft.id}/model`, { method: 'POST', form: fd })
-      await waitReady(draft.id)
+      if (!o) {
+        const created = await api<Order>('/orders', { method: 'POST', form: fd })
+        setO(created)
+        await waitReady(created.id)
+      } else {
+        await api(`/orders/${o.id}/model`, { method: 'POST', form: fd })
+        await waitReady(o.id)
+      }
     } catch (e) {
       setError(errMsg(e))
-      if (created && draft && e instanceof ApiError && (e.code === 'E-01')) {
-        // E-01: заказ не создаётся — убираем пустой черновик
-        await api(`/orders/${draft.id}/cancel`, { method: 'POST', body: {} }).catch(() => {})
-        setO(null)
-      }
     } finally { setBusy(false) }
   }
 

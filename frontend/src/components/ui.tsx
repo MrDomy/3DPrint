@@ -18,6 +18,23 @@ export const STATUSES: { code: string; label: string }[] = [
 ]
 export const statusLabel = (c: string) => STATUSES.find(s => s.code === c)?.label ?? c
 
+export const EVENT_LABELS: Record<string, string> = {
+  CREATED: 'Создание черновика',
+  STATUS_CHANGED: 'Смена статуса',
+  MESSAGE: 'Сообщение в переписке',
+  ASSIGNED: 'Назначение принтера',
+  PRICE_ADJUSTED: 'Корректировка стоимости',
+  PRIORITY_CHANGED: 'Изменение приоритета',
+  REPEATED: 'Повтор заказа',
+}
+export const eventLabel = (e: { type: string; from_status?: string | null; to_status?: string | null }) => {
+  if (e.type === 'STATUS_CHANGED') {
+    const frm = e.from_status ? `${statusLabel(e.from_status)} → ` : ''
+    return `Статус: ${frm}«${statusLabel(e.to_status || '')}»`
+  }
+  return EVENT_LABELS[e.type] ?? e.type
+}
+
 const TONE: Record<string, string> = {
   DRAFT: 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200',
   NEW: 'bg-sky-100 text-sky-800 dark:bg-sky-900/50 dark:text-sky-200',

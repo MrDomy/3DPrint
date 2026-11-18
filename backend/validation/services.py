@@ -25,7 +25,9 @@ def validate(order, mv) -> ValidationResult:
     # --- ошибки ---
     if (mv.volume_cm3 or 0) <= 0 or (mv.body_count or 0) < 1:
         issues.append(_issue('E-03', 'Модель вырождена: нулевой объём или нет твёрдых тел.'))
-    if tech and not issues and not scheduling_services.fits_any_active(technology=tech, bbox=bbox):
+    fits_tech = True
+    if tech and not scheduling_services.fits_any_active(technology=tech, bbox=bbox):
+        fits_tech = False
         issues.append(_issue('E-04', 'Габариты модели превышают область печати всех доступных принтеров '
                                      'выбранной технологии.'))
     compat = catalog_services.check_compatibility(
@@ -34,7 +36,7 @@ def validate(order, mv) -> ValidationResult:
         delivery_method=order.delivery_method, pickup_point=order.pickup_point)
     for msg in compat:
         issues.append(_issue('E-05', msg))
-    if tech and material and not issues and not scheduling_services.has_eligible(
+    if tech and material and fits_tech and not compat and not scheduling_services.has_eligible(
             technology=tech, material=material, color=order.color, bbox=bbox):
         issues.append(_issue('E-06', 'Не найден принтер, удовлетворяющий жёстким условиям распределения.'))
 

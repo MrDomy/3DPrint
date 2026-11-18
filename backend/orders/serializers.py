@@ -5,7 +5,7 @@ from pricing import services as pricing_services
 from scheduling import services as scheduling_services
 
 from .models import Status
-from .services import FINAL, TRANSITIONS, MANAGER, CLIENT, quote_state
+from .services import CLIENT, FINAL, MANAGER, TRANSITIONS, can_pass_guard, quote_state
 
 
 def _s(x):
@@ -54,7 +54,7 @@ def summary(o):
 def available_transitions(o, role):
     out = []
     for (frm, to), (roles, reason_roles) in TRANSITIONS.items():
-        if frm == o.status and role in roles:
+        if frm == o.status and role in roles and can_pass_guard(o, to):
             out.append({'to': to.value, 'label': to.label, 'reason_required': role in reason_roles})
     return out
 
@@ -83,6 +83,23 @@ def detail(o, user):
                     'created_at': e.created_at} for e in o.events.select_related('actor')],
         'available_transitions': [] if o.status in {s.value for s in FINAL} else available_transitions(o, role),
         'can_edit': o.status == Status.DRAFT and role == CLIENT,
+    }
+
+
+def integration_dto(o):
+    mv, vr, quote, _ = quote_state(o)
+    a = scheduling_services.current_assignment(o)
+    return {
+        **summary(o),
+        'quality_profile': _ref(o.quality_profile),
+        'color': _ref(o.color),
+        'post_processing': [{'id': _s(p.id), 'name': p.name} for p in o.post_processings.all()],
+        'comment': o.comment,
+        'model': model_dto(mv),
+        'quote': quote_dto(quote),
+        'assignment': None if not a else {
+            'printer': a.printer.name, 'printer_id': _s(a.printer_id), 'workshop': a.printer.workshop.name,
+            'planned_start': a.planned_start, 'planned_end': a.planned_end},
     }
 
 

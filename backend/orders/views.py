@@ -1,73 +1,110 @@
+import io
 from datetime import datetime
 
-from django.db.models import Q
+from django.conf import settings
+from django.db.models import Prefetch, Q
 from django.http import FileResponse, Http404
-from django.utils.dateparse import parse_datetime
+from django.utils.dateparse import parse_date, parse_datetime
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from config.exceptions import DomainError
-from config.permissions import IsAdminRole, IsClient, IsClientOrManager, IsManager
 from messaging import services as messaging_services
 from models_app import services as model_services
-from models_app import storage
 from pricing import services as pricing_services
+from pricing.models import Quote
 
 from . import serializers as ser
 from . import services
 from .models import Order
+from config.permissions import IsAdminRole, IsClient, IsClientOrManager, IsManager
 
 PAGE_SIZE = 20
+ALLOWED_ORDERING = {
+    'created_at': 'created_at',
+    '-created_at': '-created_at',
+    'priority': 'priority',
+    '-priority': '-priority',
+    'status': 'status',
+    '-status': '-status',
+    'number': 'number',
+    '-number': '-number',
+}
 
 
-def get_order(request, pk, manager_only=False):
-    qs = Order.objects.select_related('client', 'material', 'technology', 'quality_profile', 'color',
-                                      'delivery_method', 'pickup_point')
-    o = qs.filter(pk=pk).first()
+def get_order(request, pk):
     is_mgr = request.user.role in ('MANAGER', 'ADMIN')
-    if not o or (not is_mgr and o.client_id != request.user.id):
+    qs = Order.objects.all() if is_mgr else Order.objects.filter(client=request.user)
+    o = qs.filter(pk=pk).first()
+    if not o:
         raise Http404
     if is_mgr and o.status == 'DRAFT':
-        raise Http404  # черновики клиентов менеджерам не видны
+        raise Http404
     return o
 
 
 class OrderListCreate(APIView):
     permission_classes = [IsClientOrManager]
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
 
     def get(self, request):
-        qs = Order.objects.select_related('client', 'material', 'technology')
+        qs = (Order.objects.select_related('client', 'material', 'technology')
+              .prefetch_related(Prefetch('quotes', queryset=Quote.objects.filter(is_current=True))))
         p = request.query_params
         if request.user.role == 'CLIENT':
             qs = qs.filter(client=request.user)
         else:
             qs = qs.exclude(status='DRAFT')
         if p.get('status'):
-            qs = qs.filter(status__in=p['status'].split(','))
-        if p.get('priority'):
-            qs = qs.filter(priority=p['priority'])
+            qs = qs.filter(status__in=[s.strip() for s in p['status'].split(',') if s.strip()])
+        if p.get('priority') not in (None, ''):
+            try:
+                qs = qs.filter(priority=int(p['priority']))
+            except ValueError:
+                raise DomainError('Некорректный фильтр приоритета.', 'validation')
         if p.get('material'):
             qs = qs.filter(material_id=p['material'])
         if p.get('workshop'):
             qs = qs.filter(assignments__is_current=True, assignments__printer__workshop_id=p['workshop'])
         if p.get('date_from'):
-            qs = qs.filter(created_at__date__gte=p['date_from'])
+            df = parse_date(p['date_from'])
+            if not df:
+                raise DomainError('Некорректная дата начала периода.', 'validation')
+            qs = qs.filter(created_at__date__gte=df)
         if p.get('date_to'):
-            qs = qs.filter(created_at__date__lte=p['date_to'])
+            dt = parse_date(p['date_to'])
+            if not dt:
+                raise DomainError('Некорректная дата окончания периода.', 'validation')
+            qs = qs.filter(created_at__date__lte=dt)
         if p.get('q'):
             qs = qs.filter(Q(number__icontains=p['q']) | Q(client__email__icontains=p['q'])
                            | Q(client__full_name__icontains=p['q']))
-        qs = qs.distinct().order_by('-created_at')
-        page = max(int(p.get('page', 1)), 1)
+        ordering = ALLOWED_ORDERING.get(p.get('ordering') or '-created_at', '-created_at')
+        qs = qs.distinct().order_by(ordering, '-created_at')
+        try:
+            page = max(int(p.get('page', 1)), 1)
+        except ValueError:
+            raise DomainError('Номер страницы должен быть целым числом.', 'validation')
         total = qs.count()
         items = qs[(page - 1) * PAGE_SIZE: page * PAGE_SIZE]
-        return Response({'count': total, 'page': page, 'page_size': PAGE_SIZE,
-                         'results': [ser.summary(o) for o in items]})
+        return Response({'total': total, 'page': page, 'page_size': PAGE_SIZE,
+                         'items': [ser.summary(o) for o in items]})
 
     def post(self, request):
         if request.user.role != 'CLIENT':
             raise DomainError('Создавать заказы могут только клиенты.', 'forbidden', 403)
+        f = request.FILES.get('file') if hasattr(request, 'FILES') else None
+        if f is not None:
+            if f.size > settings.MAX_UPLOAD_BYTES:
+                raise DomainError('E-01: Размер файла превышает 50 МБ.', 'E-01')
+            raw = f.read()
+            from validation import mesh
+            mesh.check_upload(f.name, raw)
+            o = services.create_draft(request.user)
+            services.attach_model(o, request.user, f.name, raw)
+            o.refresh_from_db()
+            return Response(ser.detail(o, request.user), status=201)
         o = services.create_draft(request.user, request.data if request.data else None)
         return Response(ser.detail(o, request.user), status=201)
 
@@ -76,11 +113,10 @@ class OrderDetail(APIView):
     permission_classes = [IsClientOrManager]
 
     def get(self, request, pk):
-        return Response(ser.detail(get_order(request, pk), request.user))
+        o = get_order(request, pk)
+        return Response(ser.detail(o, request.user))
 
     def patch(self, request, pk):
-        if request.user.role != 'CLIENT':
-            raise DomainError('Недостаточно прав.', 'forbidden', 403)
         o = get_order(request, pk)
         services.update_draft(o, request.user, request.data)
         o.refresh_from_db()
@@ -96,11 +132,9 @@ class ModelUpload(APIView):
         f = request.FILES.get('file')
         if not f:
             raise DomainError('E-01: Файл не передан.', 'E-01')
-        from django.conf import settings
         if f.size > settings.MAX_UPLOAD_BYTES:
             raise DomainError('E-01: Размер файла превышает 50 МБ.', 'E-01')
         mv = services.attach_model(o, request.user, f.name, f.read())
-        services.enqueue_process(o.pk)
         o.refresh_from_db()
         return Response({'model': ser.model_dto(mv), 'order': ser.detail(o, request.user)}, status=201)
 
@@ -113,31 +147,27 @@ class ModelFile(APIView):
         mv = model_services.get_version(o, v)
         if not mv:
             raise Http404
-        info = model_services.file_info(mv)
-        info['download_url'] = f'/api/orders/{o.pk}/model/{mv.version}/download'
-        return Response(info)
+        return Response(model_services.file_info(mv))
 
 
 class ModelDownload(APIView):
     permission_classes = [IsClientOrManager]
 
     def get(self, request, pk, v):
-        import io
         o = get_order(request, pk)
         mv = model_services.get_version(o, v)
         if not mv:
             raise Http404
-        return FileResponse(io.BytesIO(storage.get(mv.storage_key)), as_attachment=True, filename=mv.file_name)
+        return FileResponse(io.BytesIO(model_services.read_bytes(mv)), as_attachment=True, filename=mv.file_name)
 
 
 class OrderQuote(APIView):
     permission_classes = [IsClientOrManager]
 
-    def get(self, request, pk):
+    def post(self, request, pk):
         o = get_order(request, pk)
-        mv, vr, quote, ready = services.quote_state(o)
-        return Response({'ready': ready, 'quote': ser.quote_dto(quote), 'validation': ser.validation_dto(vr),
-                         'model': ser.model_dto(mv), 'status': o.status})
+        q = services.manual_recalculate(o, request.user)
+        return Response(ser.quote_dto(q))
 
 
 class OrderConfirm(APIView):
@@ -175,8 +205,8 @@ class OrderRepeat(APIView):
 
     def post(self, request, pk):
         o = get_order(request, pk)
-        new = services.repeat(o, request.user)
-        return Response(ser.detail(new, request.user), status=201)
+        new_o = services.repeat(o, request.user)
+        return Response(ser.detail(new_o, request.user), status=201)
 
 
 class OrderDecision(APIView):
@@ -194,7 +224,17 @@ class OrderStatus(APIView):
 
     def post(self, request, pk):
         o = get_order(request, pk)
-        services.change_status(o, request.user, request.data.get('status'), request.data.get('reason', ''))
+        services.change_status(o, request.user, request.data.get('to'), request.data.get('reason', ''))
+        o.refresh_from_db()
+        return Response(ser.detail(o, request.user))
+
+
+class OrderPriority(APIView):
+    permission_classes = [IsManager]
+
+    def post(self, request, pk):
+        o = get_order(request, pk)
+        services.set_priority(o, request.user, request.data.get('priority'))
         o.refresh_from_db()
         return Response(ser.detail(o, request.user))
 
@@ -204,28 +244,26 @@ class OrderAdjustment(APIView):
 
     def post(self, request, pk):
         o = get_order(request, pk)
-        try:
-            amount = float(request.data.get('adjustment'))
-        except (TypeError, ValueError):
+        raw_adj = request.data.get('adjustment')
+        if raw_adj is None or raw_adj == '':
             raise DomainError('Укажите сумму корректировки.', 'validation')
-        services.adjust_price(o, request.user, amount, request.data.get('reason', ''))
+        services.adjust_price(o, request.user, raw_adj, request.data.get('reason', ''))
         o.refresh_from_db()
         return Response(ser.detail(o, request.user))
 
 
 class OrderMessages(APIView):
     permission_classes = [IsClientOrManager]
-    parser_classes = [JSONParser, MultiPartParser, FormParser]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get(self, request, pk):
         o = get_order(request, pk)
-        since = parse_datetime(request.query_params.get('since', '')) if request.query_params.get('since') else None
-        return Response([ser.message_dto(m) for m in messaging_services.list_for(o, since)])
+        return Response([ser.message_dto(m) for m in messaging_services.list_messages(o)])
 
     def post(self, request, pk):
         o = get_order(request, pk)
         f = request.FILES.get('file') if hasattr(request, 'FILES') else None
-        if f and f.size > 50 * 1024 * 1024:
+        if f and f.size > settings.MAX_UPLOAD_BYTES:
             raise DomainError('E-01: Размер файла превышает 50 МБ.', 'E-01')
         msg = services.post_message(o, request.user, request.data.get('text', ''),
                                     f.name if f else None, f.read() if f else None)
@@ -237,8 +275,7 @@ class OrderRecommendation(APIView):
 
     def get(self, request, pk):
         o = get_order(request, pk)
-        rec = services.recommendation(o)
-        return Response(rec)
+        return Response(services.recommendation(o))
 
 
 class OrderAssignment(APIView):

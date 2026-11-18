@@ -6,6 +6,8 @@ import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js'
 import { ThreeMFLoader } from 'three/examples/jsm/loaders/3MFLoader.js'
 import { api } from '../api/client'
 
+const API_BASE: string = (import.meta.env.VITE_API_URL as string | undefined) ?? '/api'
+
 interface Props { orderId: string; version: number; format: string; height?: number }
 
 async function fetchBuffer(orderId: string, version: number): Promise<ArrayBuffer> {
@@ -14,9 +16,10 @@ async function fetchBuffer(orderId: string, version: number): Promise<ArrayBuffe
     try {
       const r = await fetch(info.url)
       if (r.ok) return await r.arrayBuffer()
-    } catch { /* CORS/недоступно — резервный путь через backend */ }
+    } catch { /* резервный путь через backend */ }
   }
-  const r = await fetch(info.download_url, { credentials: 'include' })
+  const fallbackUrl = info.download_url || `${API_BASE}/orders/${orderId}/model/${version}/download`
+  const r = await fetch(fallbackUrl, { credentials: 'include' })
   if (!r.ok) throw new Error('Не удалось загрузить файл модели.')
   return await r.arrayBuffer()
 }
@@ -51,7 +54,29 @@ export default function ModelViewer({ orderId, version, format, height = 360 }: 
 
     const material = new THREE.MeshStandardMaterial({ color: 0x6366f1, metalness: 0.2, roughness: 0.55 })
 
+    const onResize = () => {
+      if (!el || disposed) return
+      const nw = el.clientWidth || 600
+      camera.aspect = nw / height
+      camera.updateProjectionMatrix()
+      renderer.setSize(nw, height)
+    }
+    window.addEventListener('resize', onResize)
+
+    const prepareMeshes = (rootObj: THREE.Object3D) => {
+      rootObj.traverse(c => {
+        if ((c as THREE.Mesh).isMesh) {
+          const mesh = c as THREE.Mesh
+          if (mesh.geometry && !mesh.geometry.attributes.normal) {
+            mesh.geometry.computeVertexNormals()
+          }
+          if (!mesh.material) mesh.material = material
+        }
+      })
+    }
+
     const place = (obj: THREE.Object3D) => {
+      prepareMeshes(obj)
       const box = new THREE.Box3().setFromObject(obj)
       const size = box.getSize(new THREE.Vector3())
       const center = box.getCenter(new THREE.Vector3())
@@ -97,6 +122,7 @@ export default function ModelViewer({ orderId, version, format, height = 360 }: 
 
     return () => {
       disposed = true
+      window.removeEventListener('resize', onResize)
       cancelAnimationFrame(raf)
       controls.dispose()
       renderer.dispose()

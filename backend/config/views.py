@@ -19,13 +19,15 @@ def health(request):
         result['db'] = 'error'
         result['status'] = 'error'
         code = 503
-    if not settings.RQ_SYNC:
+    tasks_sync = getattr(settings, 'TASKS_SYNC', getattr(settings, 'RQ_SYNC', True))
+    if not tasks_sync:
         try:
             import django_rq
 
             django_rq.get_connection('default').ping()
             result['redis'] = 'ok'
-        except Exception:  # noqa: BLE001
+        except Exception:
             result['redis'] = 'error'
-            result['status'] = 'degraded'
+            if result['status'] == 'ok':
+                result['status'] = 'degraded'
     return Response(result, status=code)
