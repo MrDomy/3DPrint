@@ -1,104 +1,88 @@
 services:
   db:
     image: postgres:16-alpine
-    container_name: 3dprint_db
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-3dprint}
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    restart: unless-stopped
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-3dprint}"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
 
   redis:
     image: redis:7-alpine
-    container_name: 3dprint_redis
-    ports:
-      - "6379:6379"
-    restart: unless-stopped
+    ports: ["6379:6379"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
-      retries: 5
+      retries: 10
 
   minio:
     image: pgsty/silo:RELEASE.2026-11-12T00-00-00Z
-    container_name: 3dprint_minio
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - minio_data:/data
-    restart: unless-stopped
+    ports: ["9000:9000", "9001:9001"]
+    volumes: [miniodata:/data]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
 
   mailpit:
     image: axllent/mailpit
-    container_name: 3dprint_mailpit
-    ports:
-      - "8025:8025" # Веб-интерфейс
-      - "1025:1025" # SMTP порт
-    restart: unless-stopped
+    ports: ["8025:8025", "1025:1025"]
 
   backend:
     build: ./backend
-    container_name: 3dprint_backend
-    command: python manage.py runserver 0.0.0.0:8000
-    volumes:
-      - ./backend:/app
-    ports:
-      - "8000:8000"
-    env_file:
-      - .env
+    image: 3dprint_backend
+    command: >
+      sh -c "python /scripts/init_s3.py &&
+             python manage.py migrate --noinput &&
+             python manage.py seed_catalog &&
+             python manage.py runserver 0.0.0.0:8000"
+    env_file: [.env]
+    environment:
+      POSTGRES_HOST: db
+      REDIS_HOST: redis
+      MINIO_ENDPOINT: http://minio:9000
+      EMAIL_HOST: mailpit
+    volumes: ["./backend:/app", "./scripts:/scripts"]
+    ports: ["8000:8000"]
     depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      minio: {condition: service_healthy}
 
   worker:
     image: 3dprint_backend
-    container_name: 3dprint_worker
     command: python manage.py rqworker default
-    volumes:
-      - ./backend:/app
-    env_file:
-      - .env
-    depends_on:
-      redis:
-        condition: service_healthy
-      db:
-        condition: service_healthy
+    env_file: [.env]
+    environment:
+      POSTGRES_HOST: db
+      REDIS_HOST: redis
+      MINIO_ENDPOINT: http://minio:9000
+      EMAIL_HOST: mailpit
+    volumes: ["./backend:/app"]
+    depends_on: [backend]
 
   frontend:
     build: ./frontend
-    container_name: 3dprint_frontend
-    ports:
-      - "5173:5173"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
+    command: npm run dev -- --host 0.0.0.0
     environment:
-      - VITE_API_URL=http://localhost:8000/api
+      VITE_PROXY_TARGET: http://backend:8000
+      VITE_API_URL: /api
+    volumes: ["./frontend:/app", "/app/node_modules"]
+    ports: ["5173:5173"]
+    depends_on: [backend]
 
 volumes:
-  postgres_data:
-  minio_data:
+  pgdata:
+  miniodata:

@@ -1,5 +1,9 @@
 .env
 node_modules/
+.venv/
+*.sqlite3
+media_private/
+backend/media_private/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -224,3 +228,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Dumps, digests and archives
+*digest*
+*.zip

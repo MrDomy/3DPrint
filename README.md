@@ -1,132 +1,77 @@
-# 3DPrint
+# 3DPrint — портал заказа 3D-печати (MVP)
 
-Система заказа 3D-печати. 
+Модульный монолит: Django 6 + DRF + django-rq + PostgreSQL 16 + Redis 7 + MinIO + React/TypeScript/Vite/Tailwind/three.js.
+Весь интерфейс — на русском языке.
 
-**Технологический стек**:
-- Python 3.12 (Django 5, DRF)
-- React 18 (TypeScript, Vite)
-- PostgreSQL 16
-- Redis 7
-- MinIO / SILO (S3)
+> ⚠️ Код написан без возможности запуска Django/npm в среде генерации: формулы цены проверены на эталонных кейсах, остальное (миграции, pytest, `npm run build`) нужно прогнать у себя — см. раздел 7.
 
-## 📋 Предварительные требования
-Перед началом работы убедитесь, что у вас установлены:
-1. [Git](https://git-scm.com/downloads)
-2. [Docker Desktop](https://www.docker.com/products/docker-desktop/) (для Windows/Mac) или Docker Engine (для Linux). **Важно:** Docker Desktop должен быть запущен перед выполнением команд.
-
-## 🚀 Как запустить локально
-
-1. Склонируйте репозиторий и перейдите в папку проекта:
-
-```bash
-git clone https://github.com/Proxy-hue/3DPrint.git
-cd 3DPrint
-```
-
-2. Создайте файл `.env` на основе `.env.example`:
-
+## 1. Запуск в Docker
 ```bash
 cp .env.example .env
+docker compose up --build
 ```
+При старте backend сам создаёт бакет, применяет миграции и загружает справочники (`seed_catalog`).
 
-*(Файл `.env` содержит локальные пароли и не попадает в Git. Если на Windows команда `cp` не работает, просто скопируйте файл вручную и переименуйте).*
+| Сервис | Адрес |
+|---|---|
+| SPA | http://localhost:5173 |
+| API / Swagger | http://localhost:8000/api/docs |
+| Django Admin | http://localhost:8000/admin/ |
+| MinIO консоль | http://localhost:9001 |
+| Mailpit | http://localhost:8025 |
 
-3. Запустите инфраструктуру (при первом запуске скачаются зависимости и соберутся контейнеры):
+## 2. Запуск без Docker
+Backend (Python 3.12):
+```bash
+cd backend
+python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+cp ../.env.example ../.env
+```
+В `.env` замените хосты: `POSTGRES_HOST=localhost`, `REDIS_HOST=localhost`, `MINIO_ENDPOINT=http://localhost:9000`,
+`EMAIL_HOST=localhost`, `VITE_PROXY_TARGET=http://localhost:8000`.
+
+Минимальный вариант вообще без внешних сервисов — раскомментируйте в `.env`:
+`USE_SQLITE=True`, `USE_LOCAL_STORAGE=True`, `TASKS_SYNC=True`.
 
 ```bash
-docker compose up -d --build
+python manage.py makemigrations     # один раз, см. примечание о миграциях
+python manage.py migrate
+python manage.py seed_catalog
+python manage.py runserver
+# в отдельном терминале (если не TASKS_SYNC): python manage.py rqworker default
 ```
-
-4. Проверка: убедитесь, что все контейнеры запустились (статус `Up` или `Running`):
-
+Frontend:
 ```bash
-docker ps
+cd frontend
+npm install
+npm run dev
 ```
 
-5. Первичная настройка базы данных и хранилища:
-Выполните эти команды один раз, чтобы применить миграции БД и создать бакет для файлов:
+## 3. Демо-пользователи (`seed_catalog`)
+| Роль | Email | Пароль |
+|---|---|---|
+| Администратор | admin@3dprint.local | Admin123! |
+| Менеджер | manager@3dprint.local | Manager123! |
+| Клиент | client@3dprint.local | Client123! |
 
+## 4. Тесты и проверки
 ```bash
-# Применяем миграции Django
-docker compose exec backend python manage.py migrate
-
-# Создаем суперпользователя для админки (придумайте логин/пароль)
-docker compose exec backend python manage.py createsuperuser
-
-# Устанавливаем boto3 (если не установлен) и создаем бакет в S3
-pip install boto3
-python scripts/init_s3.py
+cd backend && pytest
+python manage.py makemigrations --check --dry-run
+flake8 . --count --select=E9,F63,F7,F82
+cd ../frontend && npm run build
 ```
 
-## 🔗 Доступные сервисы после запуска:
-- Frontend (React): http://localhost:5173
-- Backend (Django API): http://localhost:8000
-- Админка Django: http://localhost:8000/admin
-- PostgreSQL (БД): localhost:5432 (Данные для входа в .env)
-- S3-хранилище (SILO/MinIO): http://localhost:9001
-    - Логин: minioadmin
-    - Пароль: minioadmin
+## 5. Интеграционный API
+Создайте `ApiClient` в `/admin/` либо из shell: `ApiClient.issue('engineer', ['orders:read','orders:write','export:read'])`
+(ключ показывается один раз, в БД хранится хэш). Передавайте заголовок `X-API-Key`.
 
-## 🛑 Как остановить
-Остановить контейнеры (данные сохранятся):
+## 6. Отличия от исходного scaffold
+- В `docker-compose.yml` фронтенд использует `VITE_API_URL=/api` и проксирует `/api`, `/admin` через Vite (одно происхождение — проще с cookie/CSRF).
+- `users.User` расширен миграцией `0002_extend_user.py`; `0001_initial.py` не изменялся.
 
-```bash
-docker compose stop
-```
-
-Остановить и удалить контейнеры (данные в БД и файлы в MinIO сохранятся в volumes):
-
-```bash
-docker compose down
-```
-
-## 🌿 Как работать с Git
-Мы используем GitFlow. Прямые коммиты в `main` и `develop` запрещены (защищено правилами GitHub).
-
-### Процесс разработки
-
-1. Переключитесь на `develop` и стяните последние изменения:
-
-```bash
-git checkout develop
-git pull origin develop
-```
-
-2. Создайте ветку под свою задачу от `develop`:
-
-```bash
-git checkout -b feature/название-вашей-фичи
-# например: git checkout -b feature/auth-login
-```
-
-3. Пишите код, делайте коммиты:
-
-```bash
-git add .
-git commit -m "feat: добавил форму авторизации"
-```
-
-4. Пушьте ветку в удаленный репозиторий:
-
-```bash
-git push origin feature/название-вашей-фичи
-```
-
-5. Перейдите на GitHub, создайте Pull Request из вашей ветки в `develop`.
-6. Дождитесь ревью (Code Review) от тимлида или коллеги.
-
-## 📁 Структура проекта (заполняется по мере разработки)
-```text
-3DPrint/
-├── backend/            # Django-проект (API, бизнес-логика)
-├── frontend/           # React-приложение (Клиентский портал, АРМ менеджера)
-├── scripts/            # Вспомогательные скрипты (init_s3.py)
-├── .github/workflows/  # CI пайплайны (GitHub Actions)
-├── .env.example        # Шаблон переменных окружения
-├── .gitignore          # Исключения для Git
-├── docker-compose.yml  # Конфигурация локальной инфраструктуры
-└── README.md           # Этот файл
-```
-
-## ❓ Частые проблемы (Troubleshooting)
-Ошибка `port is already allocated`: У вас на компьютере уже запущен PostgreSQL, Redis или другой Docker-контейнер, который занимает порт. Остановите старые контейнеры (`docker ps` -> `docker stop <id>`) или измените порты в `docker-compose.yml`.
+## 7. Первый запуск: что нужно сделать один раз
+1. `cd backend && python manage.py makemigrations` — сгенерировать и закоммитить миграции новых приложений (`users/0002_extend_user.py` уже есть и зависит от вашего `0001_initial`).
+2. `cd frontend && npm install` — создаст `package-lock.json` (нужен для `npm ci` в CI), затем закоммитьте его.
+3. `pytest` в `backend/` и `npm run build` во `frontend/`; при ошибках типов/импортов поправьте точечно.

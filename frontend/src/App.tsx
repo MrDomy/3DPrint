@@ -1,27 +1,55 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import ClientHome from './pages/client/ClientHome';
-import ManagerDashboard from './pages/manager/ManagerDashboard';
-import NotFound from './pages/NotFound';
-import './App.css'; // Если он есть, или удалите эту строку
+import { Navigate, Route, Routes } from 'react-router-dom'
+import { useAuth } from './auth/AuthContext'
+import Layout from './components/Layout'
+import { Spinner } from './components/ui'
+import Login from './pages/Login'
+import Register from './pages/Register'
+import { PasswordReset, PasswordResetConfirm } from './pages/PasswordReset'
+import NewOrder from './pages/NewOrder'
+import MyOrders from './pages/MyOrders'
+import OrderDetail from './pages/OrderDetail'
+import Notifications from './pages/Notifications'
+import Queue from './pages/manager/Queue'
+import OrderReview from './pages/manager/OrderReview'
+import LoadDashboard from './pages/manager/LoadDashboard'
+import type { Role } from './api/types'
 
-function App() {
-  return (
-    <BrowserRouter>
-      <Routes>
-        {/* При заходе на корень сайта - редирект на клиента */}
-        <Route path="/" element={<Navigate to="/client" replace />} />
-        
-        {/* Маршруты Клиента */}
-        <Route path="/client" element={<ClientHome />} />
-        
-        {/* Маршруты Менеджера */}
-        <Route path="/manager" element={<ManagerDashboard />} />
-        
-        {/* Обработка 404 */}
-        <Route path="*" element={<NotFound />} />
-      </Routes>
-    </BrowserRouter>
-  );
+function Guard({ roles, children }: { roles?: Role[]; children: JSX.Element }) {
+  const { user, loading } = useAuth()
+  if (loading) return <Spinner />
+  if (!user) return <Navigate to="/login" replace />
+  if (roles && !roles.includes(user.role)) return <Navigate to="/" replace />
+  return children
 }
 
-export default App;
+function Home() {
+  const { user, loading } = useAuth()
+  if (loading) return <Spinner />
+  if (!user) return <Navigate to="/login" replace />
+  return <Navigate to={user.role === 'CLIENT' ? '/orders' : '/manager'} replace />
+}
+
+const CLIENT: Role[] = ['CLIENT']
+const STAFF: Role[] = ['MANAGER', 'ADMIN']
+
+export default function App() {
+  return (
+    <Routes>
+      <Route path="/login" element={<Login />} />
+      <Route path="/register" element={<Register />} />
+      <Route path="/forgot-password" element={<PasswordReset />} />
+      <Route path="/reset-password/:uid/:token" element={<PasswordResetConfirm />} />
+      <Route element={<Guard><Layout /></Guard>}>
+        <Route path="/" element={<Home />} />
+        <Route path="/orders" element={<Guard roles={CLIENT}><MyOrders /></Guard>} />
+        <Route path="/orders/new" element={<Guard roles={CLIENT}><NewOrder /></Guard>} />
+        <Route path="/orders/:id" element={<Guard roles={CLIENT}><OrderDetail /></Guard>} />
+        <Route path="/notifications" element={<Notifications />} />
+        <Route path="/manager" element={<Guard roles={STAFF}><Queue /></Guard>} />
+        <Route path="/manager/orders/:id" element={<Guard roles={STAFF}><OrderReview /></Guard>} />
+        <Route path="/manager/load" element={<Guard roles={STAFF}><LoadDashboard /></Guard>} />
+      </Route>
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  )
+}

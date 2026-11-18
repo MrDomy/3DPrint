@@ -1,0 +1,5 @@
+PP_PAINTING = 'Покраска'
+PP_ASSEMBLY = 'Сборка'
+COLOR_TRANSPARENT = 'прозрачный'
+MATERIAL_HS_RESIN = 'Высокопрочная смола'
+TECH_DMLS = 'DMLS'

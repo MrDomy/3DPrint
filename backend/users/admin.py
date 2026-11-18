@@ -1,28 +1,19 @@
 from django.contrib import admin
-from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from django.contrib.auth.admin import UserAdmin
+
 from .models import User
 
+
 @admin.register(User)
-class UserAdmin(BaseUserAdmin):
-    ordering = ['email']
-    list_display = ['email', 'role', 'is_staff']
-    
-    # Переопределяем fieldsets, так как у нас нет username
+class AppUserAdmin(UserAdmin):
+    ordering = ('email',)
+    list_display = ('email', 'full_name', 'role', 'is_senior', 'is_active')
+    list_filter = ('role', 'is_active', 'client_type')
+    search_fields = ('email', 'full_name', 'phone')
     fieldsets = (
         (None, {'fields': ('email', 'password')}),
-        ('Personal info', {'fields': ('phone', 'company_name')}),
-        ('Permissions', {'fields': ('role',
-                                    'is_active',
-                                    'is_staff',
-                                    'is_superuser',
-                                    'groups',
-                                    'user_permissions')}),
+        ('Профиль', {'fields': ('full_name', 'phone', 'client_type', 'company_name', 'consent_at')}),
+        ('Права', {'fields': ('role', 'is_senior', 'is_active', 'is_staff', 'is_superuser', 'groups',
+                              'user_permissions')}),
     )
-    
-    add_fieldsets = (
-        (None, {
-            'classes': ('wide',),
-            'fields': ('email', 'password1', 'password2', 'role'),
-        }),
-    )
-    search_fields = ('email',)
+    add_fieldsets = ((None, {'classes': ('wide',), 'fields': ('email', 'role', 'password1', 'password2')}),)

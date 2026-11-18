@@ -1,3 +1,13 @@
-from django.shortcuts import render
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
-# Create your views here.
+from config.permissions import IsManager
+
+from . import services
+
+
+class LoadView(APIView):
+    permission_classes = [IsManager]
+
+    def get(self, request):
+        return Response(services.equipment_load())
