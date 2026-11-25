@@ -1,82 +1,90 @@
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
-import type { ButtonHTMLAttributes, ReactNode, SelectHTMLAttributes } from 'react';
-import type { OrderStatus } from '../types';
+import { ReactNode } from 'react'
 
-export function cn(...values: ClassValue[]) {
-  return twMerge(clsx(values));
+export const STATUSES: { code: string; label: string }[] = [
+  { code: 'DRAFT', label: 'Черновик' },
+  { code: 'NEW', label: 'Новый' },
+  { code: 'CHECKED', label: 'Проверен' },
+  { code: 'MANUAL_REVIEW', label: 'Ручная проверка' },
+  { code: 'CLARIFICATION', label: 'Требуется уточнение' },
+  { code: 'AWAITING_PAYMENT', label: 'Ожидает оплаты' },
+  { code: 'PAID', label: 'Оплачен' },
+  { code: 'DISTRIBUTED', label: 'Распределён' },
+  { code: 'PRINTING', label: 'В печати' },
+  { code: 'POST_PROCESSING', label: 'Постобработка' },
+  { code: 'READY', label: 'Готов к выдаче' },
+  { code: 'COMPLETED', label: 'Выполнен' },
+  { code: 'REJECTED', label: 'Отклонён' },
+  { code: 'CANCELLED', label: 'Отменён' },
+]
+export const statusLabel = (c: string) => STATUSES.find(s => s.code === c)?.label ?? c
+
+export const EVENT_LABELS: Record<string, string> = {
+  CREATED: 'Создание черновика',
+  STATUS_CHANGED: 'Смена статуса',
+  MESSAGE: 'Сообщение в переписке',
+  ASSIGNED: 'Назначение принтера',
+  PRICE_ADJUSTED: 'Корректировка стоимости',
+  PRIORITY_CHANGED: 'Изменение приоритета',
+  REPEATED: 'Повтор заказа',
+}
+export const eventLabel = (e: { type: string; from_status?: string | null; to_status?: string | null }) => {
+  if (e.type === 'STATUS_CHANGED') {
+    const frm = e.from_status ? `${statusLabel(e.from_status)} → ` : ''
+    return `Статус: ${frm}«${statusLabel(e.to_status || '')}»`
+  }
+  return EVENT_LABELS[e.type] ?? e.type
 }
 
-interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: 'primary' | 'secondary' | 'quiet' | 'danger';
-  icon?: ReactNode;
+const TONE: Record<string, string> = {
+  DRAFT: 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200',
+  NEW: 'bg-sky-100 text-sky-800 dark:bg-sky-900/50 dark:text-sky-200',
+  CHECKED: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200',
+  MANUAL_REVIEW: 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200',
+  CLARIFICATION: 'bg-orange-100 text-orange-800 dark:bg-orange-900/50 dark:text-orange-200',
+  REJECTED: 'bg-rose-100 text-rose-800 dark:bg-rose-900/50 dark:text-rose-200',
+  CANCELLED: 'bg-rose-100 text-rose-800 dark:bg-rose-900/50 dark:text-rose-200',
+  COMPLETED: 'bg-teal-100 text-teal-800 dark:bg-teal-900/50 dark:text-teal-200',
+}
+export function StatusBadge({ status }: { status: string }) {
+  const cls = TONE[status] ?? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/50 dark:text-indigo-200'
+  return <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-medium ${cls}`}>{statusLabel(status)}</span>
 }
 
-export function Button({ variant = 'secondary', icon, className, children, ...props }: ButtonProps) {
+export const rub = (n: number | string | null | undefined) =>
+  n === null || n === undefined || n === '' ? '—' : new Intl.NumberFormat('ru-RU').format(Math.round(Number(n))) + ' ₽'
+export const fmtDate = (s?: string | null) =>
+  s ? new Date(s).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' }) : '—'
+export const fmtDay = (s?: string | null) => (s ? new Date(s).toLocaleDateString('ru-RU') : '—')
+
+export function ErrorBox({ message }: { message?: string }) {
+  if (!message) return null
+  return <div role="alert" className="rounded-lg border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:border-rose-800 dark:bg-rose-950/50 dark:text-rose-200">{message}</div>
+}
+export function InfoBox({ children }: { children: ReactNode }) {
+  return <div className="rounded-lg border border-sky-300 bg-sky-50 px-3 py-2 text-sm text-sky-800 dark:border-sky-800 dark:bg-sky-950/50 dark:text-sky-200">{children}</div>
+}
+export function Spinner({ text = 'Загрузка…' }: { text?: string }) {
+  return <div className="py-10 text-center text-sm text-slate-500">{text}</div>
+}
+export function Field({ label, children }: { label: string; children: ReactNode }) {
+  return <label className="block"><span className="label">{label}</span>{children}</label>
+}
+
+export function VerdictPanel({ v }: { v: { verdict: string; issues: { code: string; message: string }[] } | null }) {
+  if (!v) return <p className="text-sm text-slate-500">Проверка модели выполняется…</p>
+  const tone = v.verdict === 'ERROR' ? 'border-rose-400 bg-rose-50 dark:bg-rose-950/40'
+    : v.verdict === 'WARNING' ? 'border-amber-400 bg-amber-50 dark:bg-amber-950/40'
+      : 'border-emerald-400 bg-emerald-50 dark:bg-emerald-950/40'
+  const title = v.verdict === 'ERROR' ? 'Обнаружены ошибки — заказ уйдёт на ручную проверку менеджером'
+    : v.verdict === 'WARNING' ? 'Есть предупреждения' : 'Замечаний нет'
   return (
-    <button
-      className={cn(
-        'inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-bold transition duration-200 disabled:pointer-events-none disabled:opacity-45',
-        variant === 'primary' && 'bg-accent text-[#211106] hover:bg-accent-light',
-        variant === 'secondary' && 'border border-line bg-panel text-foreground hover:border-muted hover:bg-panel-hover',
-        variant === 'quiet' && 'text-muted hover:bg-panel-hover hover:text-foreground',
-        variant === 'danger' && 'border border-red-500/30 bg-red-500/10 text-red-300 hover:bg-red-500/15',
-        className,
-      )}
-      {...props}
-    >
-      {icon}
-      {children}
-    </button>
-  );
-}
-
-export function Card({ className, children }: { className?: string; children: ReactNode }) {
-  return <section className={cn('rounded-2xl border border-line bg-card p-5 shadow-card sm:p-6', className)}>{children}</section>;
-}
-
-const statusClass: Record<OrderStatus, string> = {
-  Pending: 'border-amber-400/20 bg-amber-400/10 text-amber-300',
-  'In Production': 'border-accent/20 bg-accent/10 text-accent-light',
-  Shipped: 'border-sky-400/20 bg-sky-400/10 text-sky-300',
-  Delivered: 'border-emerald-400/20 bg-emerald-400/10 text-emerald-300',
-};
-
-const statusLabel: Record<OrderStatus, string> = {
-  Pending: 'Ожидает',
-  'In Production': 'В производстве',
-  Shipped: 'Отправлен',
-  Delivered: 'Доставлен',
-};
-
-export function Badge({ status }: { status: OrderStatus }) {
-  return (
-    <span className={cn('inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-bold', statusClass[status])}>
-      <span className="size-1.5 rounded-full bg-current" />
-      {statusLabel[status]}
-    </span>
-  );
-}
-
-interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
-  label: string;
-  options: { value: string; label: string }[];
-}
-
-export function Select({ label, options, className, ...props }: SelectProps) {
-  return (
-    <label className="flex min-w-0 flex-col gap-2 text-sm font-semibold text-muted">
-      {label}
-      <select
-        className={cn('min-h-11 w-full rounded-xl border border-line bg-app-bg px-3 text-sm text-foreground outline-none transition focus:border-accent', className)}
-        {...props}
-      >
-        {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-      </select>
-    </label>
-  );
-}
-
-export function Spinner({ className }: { className?: string }) {
-  return <span aria-label="Загрузка" className={cn('inline-block size-4 animate-spin rounded-full border-2 border-current border-r-transparent', className)} />;
+    <div className={`rounded-lg border p-3 ${tone}`}>
+      <div className="mb-1 text-sm font-semibold">{title}</div>
+      <ul className="space-y-1 text-sm">
+        {v.issues.map((i, k) => (
+          <li key={k}><span className="mr-2 rounded bg-black/10 px-1.5 py-0.5 font-mono text-xs dark:bg-white/10">{i.code}</span>{i.message}</li>
+        ))}
+      </ul>
+    </div>
+  )
 }
