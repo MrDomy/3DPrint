@@ -65,7 +65,7 @@ class OrderListCreate(APIView):
                 raise DomainError('Некорректный фильтр приоритета.', 'validation')
         if p.get('material'):
             qs = qs.filter(material_id=p['material'])
-        if p.get('workshop'):
+        if p.get('workshop') and hasattr(Order, 'assignments'):
             qs = qs.filter(assignments__is_current=True, assignments__printer__workshop_id=p['workshop'])
         if p.get('date_from'):
             df = parse_date(p['date_from'])
