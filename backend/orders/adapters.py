@@ -145,12 +145,16 @@ def _analyze_fallback(data: bytes, fmt: str) -> dict:
 
     overhang_ratio = 0.0
     try:
-        normals = combined.face_normals
-        areas = combined.area_faces
+        normals = np.asarray(combined.face_normals)
+        areas = np.asarray(combined.area_faces)
         total_area = float(np.sum(areas))
         if total_area > 0:
             cos45 = -math.cos(math.radians(45.0))
-            overhang_ratio = round(float(np.sum(areas[normals[:, 2] < cos45])) / total_area, 4)
+            zmin = float(combined.bounds[0][2])
+            centers_z = np.asarray(combined.triangles_center)[:, 2]
+            off_bed = centers_z > zmin + 0.5
+            overhang_mask = (normals[:, 2] < cos45) & off_bed
+            overhang_ratio = round(float(np.sum(areas[overhang_mask])) / total_area, 4)
     except Exception:
         overhang_ratio = 0.0
 

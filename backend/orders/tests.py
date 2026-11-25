@@ -200,7 +200,9 @@ def test_rest_api_list_pagination_quote_get_and_rbac(env_data):
     r_quote = c_client.get(f'/api/orders/{oid}/quote')
     assert r_quote.status_code == 200
     assert r_quote.data['quote']['total'] == 300
-    assert r_quote.data['validation']['verdict'] in ('OK', 'WARNING')
+    assert r_quote.data['validation']['verdict'] == 'OK'
+    assert r_quote.data['validation']['issues'] == []
+    assert r_quote.data['validation']['needs_support'] is False
     assert r_quote.data['ready'] is True
 
     # Скачивание модели и проверка ссылки /file

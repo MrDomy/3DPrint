@@ -159,7 +159,7 @@ export default function NewOrder() {
       <ErrorBox message={error} />
 
       <div className="grid gap-4 lg:grid-cols-5">
-        <div className="space-y-4 lg:col-span-3">
+        <div className={`space-y-4 ${step === 3 || (!o?.model && !o?.quote) ? 'lg:col-span-5' : 'lg:col-span-3'}`}>
           {step === 0 && (
             <div className="card space-y-3">
               <h2 className="text-lg font-semibold">Загрузка 3D-модели</h2>
@@ -269,10 +269,22 @@ export default function NewOrder() {
           )}
         </div>
 
-        <aside className="space-y-4 lg:col-span-2">
-          <div className="card"><h3 className="mb-2 font-semibold">Предварительный расчёт</h3><QuoteBlock order={o ?? ({ quote: null } as Order)} /></div>
-          <div className="card"><h3 className="mb-2 font-semibold">Проверка модели</h3><VerdictPanel v={o?.validation ?? null} /></div>
-        </aside>
+        {step < 3 && (o?.model || o?.quote) && (
+          <aside className="space-y-4 lg:col-span-2">
+            {step > 0 && o?.quote && (
+              <div className="card">
+                <h3 className="mb-2 font-semibold">Предварительный расчёт</h3>
+                <QuoteBlock order={o} />
+              </div>
+            )}
+            {o?.model && (
+              <div className="card">
+                <h3 className="mb-2 font-semibold">Проверка модели</h3>
+                <VerdictPanel v={o.validation ?? null} />
+              </div>
+            )}
+          </aside>
+        )}
       </div>
 
       <div className="flex justify-between">
