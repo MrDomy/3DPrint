@@ -15,13 +15,42 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
-from django.urls import path, include
+from django.db import connection
+from django.http import JsonResponse
+from django.urls import include, path
 from django.views.generic import RedirectView
+from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
+
+from orders import temp_auth
+
+
+def health(request):
+    try:
+        connection.ensure_connection()
+        db = 'ok'
+    except Exception:
+        db = 'error'
+    return JsonResponse({'status': 'ok' if db == 'ok' else 'degraded', 'db': db}, status=200 if db == 'ok' else 503)
 
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('health', health),
+    path('api/schema', SpectacularAPIView.as_view(), name='schema'),
+    path('api/docs', SpectacularSwaggerView.as_view(url_name='schema'), name='docs'),
     path('api/catalog/', include('catalog.urls')),
     path('api/', include('catalog.equipment_urls')),
+    # Заказы, расчёт, сообщения, уведомления (зона ответственности А. Г. Видермана)
+    path('api/', include('orders.urls')),
+    path('api/', include('notifications.urls')),
+    # TEMPORARY auth endpoints для локальной проверки клиентского портала до слияния модуля `users` (П. А. Юшкова)
+    path('api/auth/csrf', temp_auth.csrf_view, name='temp-auth-csrf'),
+    path('api/auth/register', temp_auth.register_view, name='temp-auth-register'),
+    path('api/auth/login', temp_auth.login_view, name='temp-auth-login'),
+    path('api/auth/logout', temp_auth.logout_view, name='temp-auth-logout'),
+    path('api/auth/me', temp_auth.me_view, name='temp-auth-me'),
+    path('api/auth/password-reset', temp_auth.password_reset_view, name='temp-auth-password-reset'),
+    path('api/auth/password-reset/confirm', temp_auth.password_reset_confirm_view, name='temp-auth-password-reset-confirm'),
     path('', RedirectView.as_view(url='/api/catalog/', permanent=False)),
 ]
+

@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
 import os
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -29,10 +30,15 @@ ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,backend').split(
 CSRF_TRUSTED_ORIGINS = os.getenv('CSRF_TRUSTED_ORIGINS', 'http://localhost:5173').split(',')
 
 
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_BACKEND = os.getenv(
+    'EMAIL_BACKEND',
+    'django.core.mail.backends.console.EmailBackend'
+    if DEBUG else 'django.core.mail.backends.smtp.EmailBackend',
+)
 EMAIL_HOST = os.getenv('EMAIL_HOST', 'mailpit')
 EMAIL_PORT = int(os.getenv('EMAIL_PORT', 1025))
 EMAIL_USE_TLS = False
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'noreply@3dprint.local')
 
 AUTH_USER_MODEL = 'users.User'
 
@@ -96,17 +102,25 @@ TEMPLATES = [
 WSGI_APPLICATION = 'config.wsgi.application'
 
 
-# Database (PostgreSQL from Docker)
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.getenv('POSTGRES_DB', '3dprint'),
-        'USER': os.getenv('POSTGRES_USER', 'postgres'),
-        'PASSWORD': os.getenv('POSTGRES_PASSWORD', 'postgres'),
-        'HOST': os.getenv('POSTGRES_HOST', 'db'),
-        'PORT': os.getenv('POSTGRES_PORT', '5432'),
+# Database (PostgreSQL from Docker; optional USE_SQLITE for local offline dev/testing)
+if os.getenv('USE_SQLITE', 'False').lower() in ('1', 'true', 'yes'):
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.getenv('POSTGRES_DB', '3dprint'),
+            'USER': os.getenv('POSTGRES_USER', 'postgres'),
+            'PASSWORD': os.getenv('POSTGRES_PASSWORD', 'postgres'),
+            'HOST': os.getenv('POSTGRES_HOST', 'db'),
+            'PORT': os.getenv('POSTGRES_PORT', '5432'),
+        }
+    }
 
 
 # Password validation
@@ -138,6 +152,8 @@ USE_TZ = True
 
 
 STATIC_URL = 'static/'
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / os.getenv('MEDIA_DIR', 'media_private')
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
@@ -148,7 +164,14 @@ REST_FRAMEWORK = {
     ),
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 50,
+    'EXCEPTION_HANDLER': 'orders.exceptions.api_exception_handler',
 }
+
+# Runtime settings used by orders / pricing / notifications / payment
+TASKS_SYNC = os.getenv('TASKS_SYNC', 'False').lower() in ('1', 'true', 'yes') or ('pytest' in sys.modules)
+PAY_STUB_ENABLED = os.getenv('PAY_STUB_ENABLED', 'True').lower() in ('1', 'true', 'yes')
+MAX_UPLOAD_BYTES = int(os.getenv('MAX_UPLOAD_BYTES', 50 * 1024 * 1024))
+MAX_3MF_UNPACKED_BYTES = int(os.getenv('MAX_3MF_UNPACKED_BYTES', 500 * 1024 * 1024))
 
 # Django-RQ settings (Redis Queue)
 RQ_QUEUES = {
