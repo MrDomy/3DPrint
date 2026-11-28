@@ -40,7 +40,7 @@ urlpatterns = [
     path('api/docs', SpectacularSwaggerView.as_view(url_name='schema'), name='docs'),
     path('api/catalog/', include('catalog.urls')),
     path('api/', include('catalog.equipment_urls')),
-    # Заказы, расчёт, сообщения, уведомления (зона ответственности А. Г. Видермана)
+    path('api/', include('scheduling.urls')),
     path('api/', include('orders.urls')),
     path('api/', include('notifications.urls')),
     # TEMPORARY auth endpoints для локальной проверки клиентского портала до слияния модуля `users` (П. А. Юшкова)

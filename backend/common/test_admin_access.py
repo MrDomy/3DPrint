@@ -18,7 +18,7 @@ SECTIONS = [
     'admin:messaging_message_changelist',
     'admin:notifications_notification_changelist',
     'admin:payment_payment_changelist',
-    # 'admin:scheduling_assignment_changelist',
+    'admin:scheduling_assignment_changelist',
     'admin:catalog_technology_changelist',
     'admin:catalog_auditlog_changelist',
 ]
