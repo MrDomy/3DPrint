@@ -5,7 +5,7 @@
 """
 from django.contrib import admin
 
-from common.permissions import ADMIN, get_role
+from common.admin import AdminRoleMixin, ReadOnlyAdminMixin
 
 from .audit import record, snapshot
 from .models import (
@@ -14,31 +14,8 @@ from .models import (
 )
 
 
-class AdminRoleMixin:
-    """Полный доступ только роли ADMIN."""
-
-    @staticmethod
-    def _allowed(request):
-        return get_role(request.user) == ADMIN
-
-    def has_module_permission(self, request):
-        return self._allowed(request)
-
-    def has_view_permission(self, request, obj=None):
-        return self._allowed(request)
-
-    def has_add_permission(self, request):
-        return self._allowed(request)
-
-    def has_change_permission(self, request, obj=None):
-        return self._allowed(request)
-
-    def has_delete_permission(self, request, obj=None):
-        return self._allowed(request)
-
-
-class AuditedAdmin(AdminRoleMixin, admin.ModelAdmin):
-    """ModelAdmin, пишущий изменения в журнал аудита."""
+class AuditMixin:
+    """Пишет создание, изменение и удаление в журнал аудита (до/после)."""
 
     def save_model(self, request, obj, form, change):
         obj._audit_before = None
@@ -67,6 +44,10 @@ class AuditedAdmin(AdminRoleMixin, admin.ModelAdmin):
     def delete_queryset(self, request, queryset):
         for obj in list(queryset):
             self.delete_model(request, obj)
+
+
+class AuditedAdmin(AdminRoleMixin, AuditMixin, admin.ModelAdmin):
+    """ModelAdmin справочника: доступ только ADMIN, изменения в аудите."""
 
 
 @admin.register(Workshop)
@@ -147,17 +128,8 @@ class TariffVersionAdmin(AuditedAdmin):
 
 
 @admin.register(AuditLog)
-class AuditLogAdmin(AdminRoleMixin, admin.ModelAdmin):
+class AuditLogAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     list_display = ('created_at', 'actor', 'action', 'entity_type',
                     'entity_id')
     list_filter = ('action', 'entity_type')
     search_fields = ('entity_id',)
-
-    def has_add_permission(self, request):
-        return False
-
-    def has_change_permission(self, request, obj=None):
-        return False
-
-    def has_delete_permission(self, request, obj=None):
-        return False

@@ -6,5 +6,5 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/catalog/', include('catalog.urls')),
     path('api/', include('catalog.equipment_urls')),
-    # path('api/', include('scheduling.urls')),
+    path('api/', include('scheduling.urls')),
 ]
