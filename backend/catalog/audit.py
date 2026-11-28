@@ -5,7 +5,7 @@ from django.core.serializers.json import DjangoJSONEncoder
 
 from .models import AuditLog
 
-_SKIP = {'created_at', 'updated_at'}
+_SKIP = {'created_at', 'updated_at', 'password', 'last_login'}
 
 
 def snapshot(obj):
